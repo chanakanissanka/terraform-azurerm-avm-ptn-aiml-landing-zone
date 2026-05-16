@@ -78,6 +78,10 @@ module "example_hub" {
   vnet_definition = {
     address_space = "10.10.0.0/24"
   }
+  jump_vm_definition = {
+    # Default Standard_B2s is frequently capacity-restricted in australiaeast.
+    sku = "Standard_D2s_v5"
+  }
   enable_telemetry = var.enable_telemetry
   name_prefix      = "${module.naming.resource_group.name_unique}-hub"
 }
@@ -140,6 +144,8 @@ module "test" {
     cosmosdb_definition = {
       this = {
         consistency_level = "Session"
+        # Azure no longer accepts enableAnalyticalStorage=true at create time.
+        analytical_storage_enabled = false
       }
     }
     key_vault_definition = {
@@ -219,6 +225,8 @@ module "test" {
   }
   genai_cosmosdb_definition = {
     consistency_level = "Session"
+    # Azure no longer accepts enableAnalyticalStorage=true at create time.
+    analytical_storage_enabled = false
   }
   genai_key_vault_definition = {
     public_network_access_enabled = true # configured for testing
