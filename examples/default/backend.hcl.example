@@ -1,0 +1,5 @@
+# Copy to backend.hcl and fill in for local runs. Do not commit the populated file.
+resource_group_name  = "rg-tfstate"
+storage_account_name = "sttfstateexamplexxxx"
+container_name       = "tfstate"
+key                  = "examples/default.tfstate"
