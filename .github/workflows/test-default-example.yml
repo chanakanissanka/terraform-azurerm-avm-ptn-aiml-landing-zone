@@ -94,6 +94,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: terraform init
+        id: init
         working-directory: ${{ env.EXAMPLE_DIR }}
         run: |
           terraform init -upgrade -reconfigure \
@@ -112,8 +113,9 @@ jobs:
         run: terraform apply -auto-approve -lock-timeout=10m tfplan
 
       - name: terraform destroy
-        # Always attempt destroy (even on apply failure) unless the operator opted out.
-        if: ${{ always() && inputs.skip_destroy != true }}
+        # Only run if init succeeded (i.e. state backend reachable). Runs even if
+        # plan/apply failed so partial deployments are cleaned up. Skippable via input.
+        if: ${{ always() && steps.init.outcome == 'success' && inputs.skip_destroy != true }}
         working-directory: ${{ env.EXAMPLE_DIR }}
         run: terraform destroy -auto-approve -lock-timeout=10m
 
