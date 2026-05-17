@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       skip_destroy:
-        description: 'Skip destroy step (leave resources running). USE WITH CAUTION.'
+        description: 'Skip the destroy job entirely (leave resources running). Bypasses the approval gate.'
         type: boolean
         default: false
         required: false
@@ -69,7 +69,7 @@ jobs:
         run: terraform validate
 
   deploy:
-    name: plan + apply + destroy
+    name: plan + apply
     needs: lint
     runs-on: ubuntu-latest
     # 'test' environment lets you require manual approval before real Azure deploys.
@@ -112,14 +112,67 @@ jobs:
         working-directory: ${{ env.EXAMPLE_DIR }}
         run: terraform apply -auto-approve -lock-timeout=10m tfplan
 
+      - name: Summary
+        if: ${{ always() }}
+        run: |
+          echo "### Deploy result: ${{ steps.apply.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "${{ inputs.skip_destroy }}" == "true" ]]; then
+            echo ":warning: \`skip_destroy=true\` was set on this run. The \`destroy\` job will be **skipped** and resources will remain in Azure." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo ":hourglass: The \`destroy\` job will wait for a manual approval in the **destroy-approval** environment. Approve to tear down, reject to keep resources." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  destroy:
+    name: destroy (manual approval)
+    needs: deploy
+    # Runs after deploy (success or failure) so partial deployments can be cleaned up.
+    # Skipped only when:
+    #   - the operator explicitly opted out via `skip_destroy=true` on workflow_dispatch
+    #   - the deploy job was itself skipped (e.g. lint failed)
+    if: ${{ always() && needs.deploy.result != 'skipped' && inputs.skip_destroy != true }}
+    runs-on: ubuntu-latest
+    # 'destroy-approval' environment must have required reviewers configured in
+    # GitHub repo settings -> Environments. The job pauses here until a reviewer
+    # approves or rejects.
+    environment: destroy-approval
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: '1.12.2'
+          terraform_wrapper: false
+
+      - name: Azure login (OIDC)
+        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: terraform init
+        working-directory: ${{ env.EXAMPLE_DIR }}
+        run: |
+          terraform init -reconfigure \
+            -backend-config="resource_group_name=${{ vars.TFSTATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=${{ vars.TFSTATE_CONTAINER }}" \
+            -backend-config="key=examples/default.tfstate"
+
       - name: terraform destroy
-        # Only run if init succeeded (i.e. state backend reachable). Runs even if
-        # plan/apply failed so partial deployments are cleaned up. Skippable via input.
-        if: ${{ always() && steps.init.outcome == 'success' && inputs.skip_destroy != true }}
         working-directory: ${{ env.EXAMPLE_DIR }}
         run: terraform destroy -auto-approve -lock-timeout=10m
 
-      - name: Warn if destroy skipped
-        if: ${{ inputs.skip_destroy == true }}
+  destroy_skipped_notice:
+    name: destroy skipped
+    needs: deploy
+    if: ${{ always() && needs.deploy.result != 'skipped' && inputs.skip_destroy == true }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Warn
         run: |
-          echo "::warning::skip_destroy=true was set. Azure resources from examples/default are still running. Remember to clean them up manually."
+          echo "::warning::skip_destroy=true was set. Azure resources from examples/default are still running. Trigger this workflow again with skip_destroy=false (or run 'terraform destroy' manually) to clean up."
