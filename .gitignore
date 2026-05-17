@@ -29,6 +29,9 @@ override.tf.json
 # Ignore Terraform lock file
 .terraform.lock.hcl
 
+# Local backend config (populated copy of backend.hcl.example)
+backend.hcl
+
 # Include tfplan files to ignore the plan output of command: terraform plan -out=tfplan
 # example: *tfplan*
 
